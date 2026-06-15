@@ -54,7 +54,24 @@ algorithm the network learned, in terms of its concrete parts (neurons, attentio
 than treating the model as a black box. The goal is to find the small "circuit" of components that
 implements a given behaviour.
 
-This template helps you take the first, concrete step toward that question for a model *you* build:
+### How mechinterp research usually gets started
+
+Real models like the Llama family have billions of parameters spread across dozens of layers — far
+too much to read by hand. So the field's standard entry point is to go small *on purpose*: pick a
+narrow, well-understood task, train (or find) the smallest model that can do it, and study that
+model in full. Two things make this tractable in a way the full-scale version isn't:
+
+- **You know the ground truth.** Because *you* designed the task and generated the training data,
+  you know exactly what algorithm would solve it — giving you something concrete to check the
+  model's internals against.
+- **The model is small enough to look at everything.** A few layers and a handful of heads means you
+  can inspect *every* neuron and *every* head, not just a sample, and causal interventions
+  (switching a component off and re-running) are cheap enough to try on all of them.
+
+This "design a task → train a toy model → intervene on it" recipe is how some of the field's
+best-known results were found — e.g. induction heads (discovered in tiny attention-only
+transformers) and the grokking/modular-addition circuit (see [Further reading](#further-reading)).
+This template packages exactly that recipe into a runnable pipeline:
 
 1. You choose a small, well-defined task (arithmetic, sorting, copying, parity, ...).
 2. You generate synthetic training data and **train a small GPT-2 from scratch** on it.
