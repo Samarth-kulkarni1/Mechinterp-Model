@@ -50,23 +50,35 @@ from transformers import PreTrainedTokenizerFast
 VOCAB_CHARS = sorted(
     "0123456789"
     "०१२३४५६७८९"
-    "٠١٢٣٤٥٦٧٨٩"
-    "零一二三四五六七八九"
+    "零一二三四五六七八九十百千"
     "+=\n"
 )
 
 SAMPLE_TEXTS = [
     # English
+    "13+11=24",
+    "013+011=024",
     "13+11=24\n27+5=32\n2+3=5\n8+8=",
 
     # Hindi
+    "१३+११=२४",
+    "०१३+०११=०२४",
     "१३+११=२४\n२७+५=३२\n२+३=५\n८+८=",
 
-    # Arabic
-    "١١+١٣=٢٤\n٥+٢٧=٣٢\n٢+٣=٥\n٨+٨=",
-
-    # Mandarin
+    # Mandarin (digit-sequence)
+    "一三+一一=二四",
+    "零一三+零一一=零二四",
     "一三+一一=二四\n二七+五=三二\n二+三=五\n八+八=",
+
+    # Mandarin (natural number words -- reserved characters only, not
+    # used in current training data; exercises 十/百/千 for round-trip coverage)
+    "十三+十一=二十四",
+    "九百九十九+九百九十九=一千九百九十八",
+
+    # Exhaustive digit coverage (ensures every char in VOCAB_CHARS is exercised)
+    "0123456789+=",
+    "०१२३४५६७८९+=",
+    "零一二三四五六七八九十百千+=",
 ]
 _SPECIAL_TOKENS = ["<pad>", "<bos>", "<eos>", "<unk>"]
 _VOCAB = {tok: i for i, tok in enumerate(_SPECIAL_TOKENS + VOCAB_CHARS)}

@@ -29,160 +29,100 @@ from datasets import Dataset, DatasetDict
 DIGIT_MAPS = {
     "english": list("0123456789"),
     "hindi": list("०१२३४५६७८९"),
-    "arabic": list("٠١٢٣٤٥٦٧٨٩"),
     "mandarin": list("零一二三四五六七八九"),
 }
 LANGUAGES = list(DIGIT_MAPS.keys())
-
-
-def render_number(n: int, lang: str) -> str:
-    """Render an integer digit-by-digit in the target language's numeral script."""
+ 
+PAD_WIDTH = 3  # zero-pad operands/answers to 3 digits
+ 
+ 
+def render_number(n: int, lang: str, width: int = PAD_WIDTH) -> str:
+    """Render an integer digit-by-digit in the target language's numeral script,
+    zero-padded to `width` digits. Used for OPERANDS only (forward digit order)."""
     digits = DIGIT_MAPS[lang]
-    return "".join(digits[int(d)] for d in str(n))
-
-
-"""def has_carry(a: int, b: int) -> bool:
-    True if a + b produces a carry in at least one column (base 10).
-    carry, da, db = 0, str(a)[::-1], str(b)[::-1]
-    for i in range(max(len(da), len(db))):
-        da_i = int(da[i]) if i < len(da) else 0
-        db_i = int(db[i]) if i < len(db) else 0
-        carry = 1 if da_i + db_i + carry >= 10 else 0
-    return bool(carry)
-"""
-
+    padded = str(n).zfill(width)
+    return "".join(digits[int(d)] for d in padded)
+ 
+ 
+def render_answer(n: int, lang: str) -> str:
+    """Render the answer with REVERSED digit order and NO zero-padding.
+ 
+    e.g. 12 -> "21" (ones digit first, then tens digit). This aligns
+    generation order with carry propagation (Lee et al., 2023) and means
+    the LAST generated answer token is always the original most-significant
+    digit -- i.e. the token whose hidden state has accumulated the most
+    upstream autoregressive context, since it is generated after every
+    other answer digit. This is a deliberate departure from render_number's
+    forward + zero-padded convention, which is kept for operands only.
+    """
+    digits = DIGIT_MAPS[lang]
+    return "".join(digits[int(d)] for d in str(n)[::-1])
+ 
+ 
 def render_equation(a: int, b: int, lang: str, solved: bool) -> str:
-    """'x+y=z' (solved) or 'x+y=' (unsolved). No separator -- equations are concatenated
-    directly, so example boundaries are recoverable only via the next '+' sign.
-
-    ASSUMPTION to double-check: for Arabic we swap operand order ("y+x=z") as the
-    operationalization of "RTL surface order." The '=' and answer never move, since
-    generation is autoregressive and the answer must stay last regardless of language.
+    """'x+y=z' (solved) or 'x+y=' (unsolved). No separator, no few-shot context.
+ 
+    Operands are forward digit order, zero-padded to PAD_WIDTH (render_number).
+    The answer (when solved=True) is reversed digit order, unpadded (render_answer).
     """
     ra, rb = render_number(a, lang), render_number(b, lang)
-    if lang == "arabic":
-        ra, rb = rb, ra
     if solved:
-        return f"{ra}+{rb}={render_number(a + b, lang)}"
+        return f"{ra}+{rb}={render_answer(a + b, lang)}"
     return f"{ra}+{rb}="
-
-
-def build_dataset(train_size: int, val_size: int, seed: int, val_holdout: float) -> DatasetDict:
+ 
+ 
+def build_dataset(seed: int, val_holdout: float, max_operand: int) -> DatasetDict:
     """Build the train/validation DatasetDict for your task.
-
-    Args:
-        train_size: Number of training rows to generate.
-        val_size: Number of validation rows to generate.
-        seed: Random seed for reproducibility.
-        val_holdout: Fraction of unique items to reserve for validation questions.
-
-    Returns:
-        A DatasetDict with "train" and "validation" splits. Each row must contain
-        at least "prompt" and "answer" columns.
+ 
+    Enumerates the exact coordinate universe based on max_operand
+    (e.g. 100x100 = 10,000 unique (a, b) pairs per language at max_operand=99),
+    shuffles independently per language, and splits evenly.
     """
-    # ----------------------------------------------------------------------- #
-    # TODO: implement dataset generation for your task.
-    # ----------------------------------------------------------------------- #
-    #
-    # Example (single-digit addition, 4-shot, leakage-safe -- matches the commented examples
-    # in src/train/train_tokenizer.py and src/utils/dataset.py):
-    #
-    #     import numpy as np
-    #     from datasets import Dataset
-    #
-    #     few_shot = 4
-    #
-    #     # 1. Enumerate every (a, b) item, then split into disjoint train/val pools so a
-    #     #    validation question never appears as a training question.
-    #     items = [(a, b) for a in range(10) for b in range(10)]
-    #     rng = np.random.default_rng(seed)
-    #     rng.shuffle(items)
-    #     split_idx = int(len(items) * (1 - val_holdout))
-    #     pools = {"train": items[:split_idx], "val": items[split_idx:]}
-    #
-    #     def render(a: int, b: int) -> str:
-    #         return f"{a}+{b}={a + b}"  # one solved example, e.g. "7+5=12"
-    #
-    #     # 2. Build one split: the question comes from `q_pool`, few-shot always from train.
-    #     def generate_split(total: int, q_pool: list, split_name: str, split_seed: int) -> dict:
-    #         srng = np.random.default_rng(split_seed)
-    #         fs_pool = pools["train"]
-    #         rows = []
-    #         for i in range(total):
-    #             a, b = q_pool[srng.integers(len(q_pool))]
-    #             fs = [render(*fs_pool[j]) for j in srng.integers(len(fs_pool), size=few_shot)]
-    #             prompt = "\n".join(fs) + f"\n{a}+{b}="  # ends at "=", the model produces the sum
-    #             rows.append(
-    #                 {"_id": f"{split_name}-{i}", "question": f"{a}+{b}", "answer": str(a + b), "prompt": prompt}
-    #             )
-    #         return {k: [r[k] for r in rows] for k in rows[0]}
-    #
-    #     train_data = generate_split(train_size, pools["train"], "train", seed)
-    #     val_data = generate_split(val_size, pools["val"], "validation", seed + 1)
-    #     return DatasetDict({
-    #         "train": Dataset.from_dict(train_data),
-    #         "validation": Dataset.from_dict(val_data),
-    #     })
-    #
-    # ----------------------------------------------------------------------- #
-
-    few_shot = 0
-    max_operand = 99
-    #carry_few_shot_min = 2        # Section 5: "at least two of the eight ... involve a carry"
-    #carry_oversample_frac = 0.5   # Section 5: carry problems oversampled in the corpus
-
-    rng = np.random.default_rng(seed)
-
-    # Enumerate every (a, b) item once; split into disjoint train/val pools so a val
-    # question is never seen as a training question. Reused across languages so they
-    # see identical operand distributions.
-    items = [(a, b) for a in range(max_operand + 1) for b in range(max_operand + 1)]
-    rng.shuffle(items)
-    split_idx = int(len(items) * (1 - val_holdout))
-    pools = {"train": items[:split_idx], "val": items[split_idx:]}
-    #carry_pools = {split: [it for it in pool if has_carry(*it)] for split, pool in pools.items()}
-
-    """def sample_question(split: str, srng: np.random.Generator) -> tuple[int, int]:
-        pool = carry_pools[split] if srng.random() < carry_oversample_frac else pools[split]
-        return pool[srng.integers(len(pool))]"""
-    def sample_question(split: str, srng):
-        pool = pools[split]
-        return pool[srng.integers(len(pool))]
-
-    """def sample_few_shot(srng: np.random.Generator) -> list[tuple[int, int]]:
-        carry_idx = srng.integers(len(carry_pools["train"]), size=carry_few_shot_min)
-        carry_ex = [carry_pools["train"][i] for i in carry_idx]
-        rest_idx = srng.integers(len(pools["train"]), size=few_shot - carry_few_shot_min)
-        rest = [pools["train"][i] for i in rest_idx]
-        examples = carry_ex + rest
-        srng.shuffle(examples)
-        return examples"""
-    def sample_few_shot(srng):
-        idx = srng.integers(len(pools["train"]), size=few_shot)
-        return [pools["train"][i] for i in idx]
-
-    def generate_split(total: int, q_pool: str, split_name: str, split_seed: int) -> dict:
-        srng = np.random.default_rng(split_seed)
-        rows = []
-        for i in range(total):
-            lang = LANGUAGES[i % len(LANGUAGES)]  # equal distribution across languages
-            a, b = sample_question(q_pool, srng)
-            fs_segments = [render_equation(x, y, lang, solved=True) for x, y in sample_few_shot(srng)]
-            prompt = render_equation(a, b, lang, solved=False)
-            rows.append({
-                "_id": f"{split_name}-{i}",
+    all_items = [(a, b) for a in range(max_operand + 1) for b in range(max_operand + 1)]
+ 
+    train_rows = []
+    val_rows = []
+ 
+    for idx, lang in enumerate(LANGUAGES):
+        # Distinct seed per language -> independent shuffle/split per script.
+        lang_rng = np.random.default_rng(seed + idx)
+ 
+        lang_items = all_items.copy()
+        lang_rng.shuffle(lang_items)
+ 
+        split_idx = int(len(lang_items) * (1 - val_holdout))
+        train_pool = lang_items[:split_idx]
+        val_pool = lang_items[split_idx:]
+ 
+        for i, (a, b) in enumerate(train_pool):
+            train_rows.append({
+                "_id": f"train-{lang}-{i}",
                 "language": lang,
                 "question": f"{a}+{b}",
-                "answer": render_number(a + b, lang),
-                "prompt": prompt,
-                #"has_carry": has_carry(a, b),
+                "answer": render_answer(a + b, lang),
+                "prompt": render_equation(a, b, lang, solved=False),
             })
-        srng.shuffle(rows)
-        return {k: [r[k] for r in rows] for k in rows[0]}
+ 
+        for i, (a, b) in enumerate(val_pool):
+            val_rows.append({
+                "_id": f"val-{lang}-{i}",
+                "language": lang,
+                "question": f"{a}+{b}",
+                "answer": render_answer(a + b, lang),
+                "prompt": render_equation(a, b, lang, solved=False),
+            })
+ 
+    # Shuffle the final global lists so that scripts are fully interwoven
+    # across batches during a training epoch.
+    global_rng = np.random.default_rng(seed)
+    global_rng.shuffle(train_rows)
+    global_rng.shuffle(val_rows)
+ 
+    return DatasetDict({
+        "train": Dataset.from_dict({k: [r[k] for r in train_rows] for k in train_rows[0]}),
+        "validation": Dataset.from_dict({k: [r[k] for r in val_rows] for k in val_rows[0]}),
+    })
 
-    train_data = generate_split(train_size, "train", "train", seed)
-    val_data = generate_split(val_size, "val", "validation", seed + 1)
-    return DatasetDict({"train": Dataset.from_dict(train_data), "validation": Dataset.from_dict(val_data)})
 
 
 if __name__ == "__main__":
@@ -200,8 +140,8 @@ if __name__ == "__main__":
         default="./artifacts/dataset",
         help="Local directory to save the dataset to when --hub-name is not given.",
     )
-    parser.add_argument("--train-size", type=int, default=20_000, help="Number of training rows")
-    parser.add_argument("--val-size", type=int, default=20_000, help="Number of validation rows")
+    #parser.add_argument("--train-size", type=int, default=20_000, help="Number of training rows")
+    #parser.add_argument("--val-size", type=int, default=20_000, help="Number of validation rows")
     parser.add_argument("--seed", type=int, default=42, help="Random seed (val uses seed + 1)")
     parser.add_argument(
         "--val-holdout",
@@ -213,11 +153,10 @@ if __name__ == "__main__":
     parser.add_argument("--shard-size", type=str, default="500MB", help="Max shard size per Parquet file on the Hub")
     args = parser.parse_args()
 
-    print(f"Generating dataset | train={args.train_size:,} val={args.val_size:,}\n")
+    #print(f"Generating dataset | train={args.train_size:,} val={args.val_size:,}\n")
 
     dataset = build_dataset(
-        train_size=args.train_size,
-        val_size=args.val_size,
+        max_operand = 999,
         seed=args.seed,
         val_holdout=args.val_holdout,
     )
