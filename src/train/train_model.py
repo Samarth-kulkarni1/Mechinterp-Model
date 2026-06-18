@@ -173,7 +173,7 @@ if __name__ == "__main__":
         "--output-dir", type=str, default="./saved_models", help="Output directory for model checkpoints"
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--num-epochs", type=int, default=5, help="Number of training epochs")
+    parser.add_argument("--num-epochs", type=int, default=7, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=128, help="Batch size per device for train and eval")
     parser.add_argument("--eval-max-new-tokens", type=int, default=16, help="Max tokens to generate per eval prompt")
     parser.add_argument("--learning-rate", type=float, default=1e-3, help="Peak learning rate")

@@ -41,15 +41,15 @@ def render_number(n: int, lang: str) -> str:
     return "".join(digits[int(d)] for d in str(n))
 
 
-def has_carry(a: int, b: int) -> bool:
-    """True if a + b produces a carry in at least one column (base 10)."""
+"""def has_carry(a: int, b: int) -> bool:
+    True if a + b produces a carry in at least one column (base 10).
     carry, da, db = 0, str(a)[::-1], str(b)[::-1]
     for i in range(max(len(da), len(db))):
         da_i = int(da[i]) if i < len(da) else 0
         db_i = int(db[i]) if i < len(db) else 0
         carry = 1 if da_i + db_i + carry >= 10 else 0
     return bool(carry)
-
+"""
 
 def render_equation(a: int, b: int, lang: str, solved: bool) -> str:
     """'x+y=z' (solved) or 'x+y=' (unsolved). No separator -- equations are concatenated
@@ -126,10 +126,10 @@ def build_dataset(train_size: int, val_size: int, seed: int, val_holdout: float)
     #
     # ----------------------------------------------------------------------- #
 
-    few_shot = 8
+    few_shot = 0
     max_operand = 99
-    carry_few_shot_min = 2        # Section 5: "at least two of the eight ... involve a carry"
-    carry_oversample_frac = 0.5   # Section 5: carry problems oversampled in the corpus
+    #carry_few_shot_min = 2        # Section 5: "at least two of the eight ... involve a carry"
+    #carry_oversample_frac = 0.5   # Section 5: carry problems oversampled in the corpus
 
     rng = np.random.default_rng(seed)
 
@@ -140,20 +140,26 @@ def build_dataset(train_size: int, val_size: int, seed: int, val_holdout: float)
     rng.shuffle(items)
     split_idx = int(len(items) * (1 - val_holdout))
     pools = {"train": items[:split_idx], "val": items[split_idx:]}
-    carry_pools = {split: [it for it in pool if has_carry(*it)] for split, pool in pools.items()}
+    #carry_pools = {split: [it for it in pool if has_carry(*it)] for split, pool in pools.items()}
 
-    def sample_question(split: str, srng: np.random.Generator) -> tuple[int, int]:
+    """def sample_question(split: str, srng: np.random.Generator) -> tuple[int, int]:
         pool = carry_pools[split] if srng.random() < carry_oversample_frac else pools[split]
+        return pool[srng.integers(len(pool))]"""
+    def sample_question(split: str, srng):
+        pool = pools[split]
         return pool[srng.integers(len(pool))]
 
-    def sample_few_shot(srng: np.random.Generator) -> list[tuple[int, int]]:
+    """def sample_few_shot(srng: np.random.Generator) -> list[tuple[int, int]]:
         carry_idx = srng.integers(len(carry_pools["train"]), size=carry_few_shot_min)
         carry_ex = [carry_pools["train"][i] for i in carry_idx]
         rest_idx = srng.integers(len(pools["train"]), size=few_shot - carry_few_shot_min)
         rest = [pools["train"][i] for i in rest_idx]
         examples = carry_ex + rest
         srng.shuffle(examples)
-        return examples
+        return examples"""
+    def sample_few_shot(srng):
+        idx = srng.integers(len(pools["train"]), size=few_shot)
+        return [pools["train"][i] for i in idx]
 
     def generate_split(total: int, q_pool: str, split_name: str, split_seed: int) -> dict:
         srng = np.random.default_rng(split_seed)
@@ -162,14 +168,14 @@ def build_dataset(train_size: int, val_size: int, seed: int, val_holdout: float)
             lang = LANGUAGES[i % len(LANGUAGES)]  # equal distribution across languages
             a, b = sample_question(q_pool, srng)
             fs_segments = [render_equation(x, y, lang, solved=True) for x, y in sample_few_shot(srng)]
-            prompt = "\n".join(fs_segments) + "\n" + render_equation(a, b, lang, solved=False)
+            prompt = render_equation(a, b, lang, solved=False)
             rows.append({
                 "_id": f"{split_name}-{i}",
                 "language": lang,
                 "question": f"{a}+{b}",
                 "answer": render_number(a + b, lang),
                 "prompt": prompt,
-                "has_carry": has_carry(a, b),
+                #"has_carry": has_carry(a, b),
             })
         srng.shuffle(rows)
         return {k: [r[k] for r in rows] for k in rows[0]}
@@ -200,7 +206,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--val-holdout",
         type=float,
-        default=0.1,
+        default=0.5,
         help="Fraction of unique items held out for val questions (default: 0.1). "
         "Independent of --val-size, which controls the number of val rows.",
     )
