@@ -15,6 +15,7 @@ see the commented example inside GenerationEvalTrainer.evaluate.
 
 import argparse
 import random
+from sys import prefix
 
 import numpy as np
 import torch
@@ -29,6 +30,8 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+
+from utils import dataset
 
 # --------------------------------------------------------------------------- #
 # TODO: fill these in for your task.
@@ -88,6 +91,34 @@ class GenerationEvalTrainer(Trainer):
         self.eval_batch_size = eval_batch_size
         self.eval_max_new_tokens = eval_max_new_tokens
 
+    def compute_accuracy(self, dataset, prefix):
+        results = []
+
+        for i in range(0, len(dataset), self.eval_batch_size):
+            batch = dataset[i : i + self.eval_batch_size]
+
+            predictions = run_inference_batch(
+                self.model,
+                self.processing_class,
+                batch["prompt"],
+                self.eval_max_new_tokens,
+            )
+
+            for j, predicted in enumerate(predictions):
+                results.append(
+                    {
+                        "predicted": predicted,
+                        "response": batch["response"][j],
+                    }
+                )
+
+        accuracy = (
+            sum(r["predicted"] == r["response"] for r in results)
+            / len(results)
+        )
+
+        return {f"{prefix}_accuracy": accuracy}
+
     def evaluate(
         self,
         eval_dataset: Dataset | None = None,
@@ -111,8 +142,16 @@ class GenerationEvalTrainer(Trainer):
                 for j, predicted in enumerate(predictions):
                    results.append({"predicted": predicted, "response": batch["response"][j]})
 
-            accuracy = sum(r["predicted"] == r["response"] for r in results) / len(results)
+            accuracy = (sum(r["predicted"] == r["response"] for r in results)/ len(results))
             metrics = {f"{metric_key_prefix}_accuracy": accuracy}
+
+            # Train accuracy
+            if hasattr(self, "raw_train"):
+                train_metrics = self.compute_accuracy(
+                self.raw_train,
+                "train"
+            )
+                metrics.update(train_metrics)
 
             # ------------------------------------------------------------------- #
             # Optional: per-category accuracy breakdown.
@@ -325,15 +364,17 @@ if __name__ == "__main__":
     )
 
     trainer = GenerationEvalTrainer(
-        model=model,
-        args=training_args,
-        train_dataset=tokenized_train,
-        eval_dataset=raw_val,
-        data_collator=collator,
-        processing_class=tokenizer,
-        eval_batch_size=args.batch_size,
-        eval_max_new_tokens=args.eval_max_new_tokens,
-    )
+    model=model,
+    args=training_args,
+    train_dataset=tokenized_train,
+    eval_dataset=raw_val,
+    data_collator=collator,
+    processing_class=tokenizer,
+    eval_batch_size=args.batch_size,
+    eval_max_new_tokens=args.eval_max_new_tokens,
+)
+
+    trainer.raw_train = raw_train
 
     print("\nStarting training...")
     trainer.train()
